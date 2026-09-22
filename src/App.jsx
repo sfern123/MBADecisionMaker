@@ -2,9 +2,10 @@ import { useState, useMemo } from "react";
 import { C, SANS } from "./theme.js";
 import { useProfile } from "./state/useProfile.js";
 import { toSimConfig } from "./state/defaults.js";
+import { setScholarshipTotal, setCashDeployed, scholarshipTotal } from "./state/actions.js";
 import { getSchool, SCHOOL_DATA_AS_OF } from "./data/schools.js";
 import { normalizeWeights } from "./lib/random.js";
-import { hasEquity } from "./lib/equity.js";
+import { hasEquityHoldings } from "./state/derived.js";
 import {
   resolveFinancing, runCoreSim, runSchoolComparison, runStrategies,
   runSensitivity, runInvestVsDeploy, runTradeoff, runNetWorthProjection,
@@ -41,10 +42,16 @@ export default function App() {
   // resets `onboarded`) drops you straight back to a genuine first run.
   const showOnboarding = !profile.onboarded;
 
-  const f = useMemo(() => makeFormatters(profile.currency), [profile.currency]);
+  const f = useMemo(
+    () => makeFormatters(profile.currency, {
+      showReal: profile.showRealDollars ?? true,
+      inflation: profile.inflation ?? 0.03,
+    }),
+    [profile.currency, profile.showRealDollars, profile.inflation]
+  );
   const cfg = useMemo(() => toSimConfig(profile), [profile]);
   const school = cfg.school;
-  const equityOn = hasEquity(profile.equity);
+  const equityOn = hasEquityHoldings(profile.balanceSheet ?? {});
 
   const tabs = [
     { id: "financing", label: "Financing" },
@@ -107,7 +114,7 @@ export default function App() {
     return cfg.paths.map((p, i) => ({ id: p.id, label: p.label, year1: p.year1, prob: probs[i] }));
   }, [cfg.paths]);
 
-  const maxDeployable = Math.max(0, financing.cost - profile.scholarship);
+  const maxDeployable = Math.max(0, financing.cost - scholarshipTotal(profile));
   const activeRate = effectiveApr(cfg);
 
   return (
@@ -172,14 +179,14 @@ export default function App() {
                 ⚙ Funding — drives every tab
               </div>
               <Grid cols="repeat(auto-fit, minmax(250px, 1fr))" gap={26}>
-                <Slider label="Scholarship" value={profile.scholarship}
+                <Slider label="Scholarship" value={scholarshipTotal(profile)}
                   min={0} max={Math.max(100000, Math.ceil(financing.cost / 10000) * 10000)} step={2500}
-                  onChange={v => update({ scholarship: v })} format={f.money}
+                  onChange={v => update(setScholarshipTotal(profile, v))} format={f.money}
                   description="Total award across the whole programme." />
-                <Slider label="Savings deployed" value={Math.min(profile.savingsDeployed, maxDeployable)}
-                  min={0} max={Math.max(10000, Math.ceil(Math.max(profile.totalSavings, maxDeployable) / 10000) * 10000)} step={2500}
-                  onChange={v => update({ savingsDeployed: v })} format={f.money}
-                  description="Cash put toward tuition. The rest stays invested." />
+                <Slider label="Cash deployed" value={Math.min(cfg.savingsDeployed, maxDeployable)}
+                  min={0} max={Math.max(10000, Math.ceil(Math.max(cfg.liquidAssets, 10000) / 10000) * 10000)} step={2500}
+                  onChange={v => update(setCashDeployed(profile, v))} format={f.money}
+                  description={`Cash put toward tuition, from ${f.money(cfg.liquidAssets)} liquid. The rest stays invested.`} />
                 {profile.useDirectApr ? (
                   <Slider label="Private APR (your quote)" value={profile.directApr}
                     min={0.02} max={0.2} step={0.0025}
@@ -201,35 +208,35 @@ export default function App() {
 
         {tab === "financing" && (
           <>
-            <LoanStructure f={f} financing={financing} scenarios={scenarios} activeRate={activeRate} profile={profile} school={school} />
-            <MonteCarlo f={f} core={core} profile={profile} pathSummary={pathSummary} />
-            <CreditImpact f={f} financing={financing} credit={credit} profile={profile} />
-            <SchoolComparison f={f} schools={schools} profile={profile} />
-            <CapitalStack f={f} strategies={strategies} profile={profile} />
-            <Sensitivity f={f} sensitivity={sensitivity} tradeoff={tradeoff} profile={profile} />
+            <LoanStructure f={f} financing={financing} scenarios={scenarios} activeRate={activeRate} profile={cfg} school={school} />
+            <MonteCarlo f={f} core={core} profile={cfg} pathSummary={pathSummary} />
+            <CreditImpact f={f} financing={financing} credit={credit} profile={cfg} />
+            <SchoolComparison f={f} schools={schools} profile={cfg} />
+            <CapitalStack f={f} strategies={strategies} profile={cfg} />
+            <Sensitivity f={f} sensitivity={sensitivity} tradeoff={tradeoff} profile={cfg} />
             <InvestVsDeploy f={f} invest={invest} update={update}
-              profile={{ ...profile, __schoolYears: Math.ceil(school.programYears) }} />
+              profile={{ ...cfg, __schoolYears: Math.ceil(school.programYears) }} />
             <Recommendations f={f} financing={financing} core={core} schools={schools}
-              nw={nw} invest={invest} profile={profile} tradeoff={tradeoff} />
+              nw={nw} invest={invest} profile={cfg} tradeoff={tradeoff} />
           </>
         )}
 
         {tab === "career" && (
           <>
-            <NetWorthProjection f={f} nw={nw} profile={profile} update={update} school={school} />
-            <OutcomeTiers f={f} tiers={tiers} profile={profile} update={update} />
+            <NetWorthProjection f={f} nw={nw} profile={cfg} update={update} school={school} />
+            <OutcomeTiers f={f} tiers={tiers} profile={cfg} update={update} />
           </>
         )}
 
         {tab === "equity" && equityOn && (
           <>
-            <EquitySellVsHold f={f} result={sellHold} profile={profile} update={update} />
-            <EquityStrategy f={f} strategies={equityStrategies} profile={profile} update={update} />
+            <EquitySellVsHold f={f} result={sellHold} profile={cfg} update={update} />
+            <EquityStrategy f={f} strategies={equityStrategies} profile={cfg} update={update} />
           </>
         )}
 
         {tab === "fire" && (
-          <FireProjection f={f} fire={fire} profile={profile} update={update} />
+          <FireProjection f={f} fire={fire} profile={cfg} update={update} />
         )}
 
         {tab === "summary" && (

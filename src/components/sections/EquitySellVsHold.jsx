@@ -2,6 +2,7 @@ import { ComposedChart, BarChart, Bar, Line, Area, XAxis, YAxis, CartesianGrid, 
 import { C, MONO, tooltipStyle } from "../../theme.js";
 import { SectionTitle, MetricCard, Card, Grid, Slider, Toggle, Callout, DataTable } from "../ui.jsx";
 import { GROWTH_PRESETS } from "../../data/equityPresets.js";
+import { updatePrimaryHolding } from "../../state/actions.js";
 
 export default function EquitySellVsHold({ f, result, profile, update }) {
   const e = profile.equity;
@@ -9,7 +10,7 @@ export default function EquitySellVsHold({ f, result, profile, update }) {
     borrowingAvoided, interestAvoided, paymentReduction,
     priceP10, priceP50, priceP90, alternativeTreatment, schoolYears } = result;
 
-  const setEquity = patch => update({ equity: { ...e, ...patch } });
+  const setEquity = patch => update(updatePrimaryHolding(profile, patch));
 
   return (
     <>

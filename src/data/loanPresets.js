@@ -83,3 +83,40 @@ export const TERM_OPTIONS = [
   { months: 240, label: "20 years" },
   { months: 300, label: "25 years" },
 ];
+
+/**
+ * What you give up by skipping federal loans.
+ *
+ * Note there is deliberately no "no federal" preset in the list above:
+ * whether you use federal borrowing is a single boolean on the funding
+ * record, and the presets only describe which federal *rules* apply once you
+ * do. Two places encoding the same fact is how they end up disagreeing.
+ *
+ * Purely on monthly cost, private borrowing often wins — a good credit score
+ * can beat the federal rate outright. That comparison is incomplete, because
+ * the federal protections below have no private equivalent and only matter in
+ * the situations you cannot plan for. The UI shows this list whenever federal
+ * borrowing is switched off, so the choice is made with both columns visible.
+ */
+export const FEDERAL_PROTECTIONS = [
+  {
+    label: "Income-driven repayment",
+    detail: "Federal payments can scale down with your income. Private payments are fixed regardless of what happens to your career.",
+  },
+  {
+    label: "Deferment and forbearance",
+    detail: "Formal options to pause payments during unemployment or hardship. Private lenders may offer something similar, at their discretion.",
+  },
+  {
+    label: "Loan forgiveness programmes",
+    detail: "Public Service Loan Forgiveness and similar schemes only ever apply to federal loans. Refinancing federal debt privately forfeits this permanently.",
+  },
+  {
+    label: "Death and disability discharge",
+    detail: "Federal loans are discharged. Private loans may fall to a cosigner or your estate.",
+  },
+  {
+    label: "Fixed rate, guaranteed",
+    detail: "The federal rate is set at disbursement and cannot change. Private loans may be variable.",
+  },
+];

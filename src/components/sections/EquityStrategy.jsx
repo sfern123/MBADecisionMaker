@@ -1,12 +1,13 @@
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from "recharts";
 import { C, MONO, tooltipStyle } from "../../theme.js";
 import { SectionTitle, MetricCard, Card, Grid, Slider, DataTable, Callout } from "../ui.jsx";
+import { updatePrimaryHolding } from "../../state/actions.js";
 
 const PALETTE = [C.green, C.accent, C.orange, C.accent2];
 
 export default function EquityStrategy({ f, strategies, profile, update }) {
   const e = profile.equity;
-  const setEquity = patch => update({ equity: { ...e, ...patch } });
+  const setEquity = patch => update(updatePrimaryHolding(profile, patch));
 
   const vested = e.vestedShares * e.price;
   const total = vested + profile.otherAssets;
@@ -46,9 +47,13 @@ export default function EquityStrategy({ f, strategies, profile, update }) {
           <Slider label="Annual refresh grant" value={e.annualRefresh} min={0} max={500000} step={5000}
             onChange={v => setEquity({ annualRefresh: v })} format={f.money}
             description="New equity granted each year, in currency value." />
-          <Slider label="Other invested assets" value={profile.otherAssets} min={0} max={3000000} step={10000}
-            onChange={v => update({ otherAssets: v })} format={f.money}
-            description="Everything outside this holding. Sets your diversification baseline." />
+          <div style={{ fontSize: 11, color: C.faint, lineHeight: 1.6, paddingTop: 4 }}>
+            <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: C.muted, marginBottom: 5 }}>
+              Other invested assets
+            </div>
+            <div style={{ fontFamily: MONO, fontSize: 19, fontWeight: 700, color: C.text }}>{f.money(profile.otherAssets)}</div>
+            Everything outside this holding, taken from your balance sheet. Edit it in Settings &rarr; Balance sheet.
+          </div>
           <Slider label="Annual trim rate" value={profile.diversifyPct} min={0.05} max={0.75} step={0.05}
             onChange={v => update({ diversifyPct: v })} format={v => (v * 100).toFixed(0) + "%"}
             description="Used by the gradual-diversification strategy." />

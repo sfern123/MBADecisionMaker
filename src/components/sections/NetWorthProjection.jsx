@@ -1,11 +1,31 @@
 import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from "recharts";
 import { C, MONO, tooltipStyle } from "../../theme.js";
 import { SectionTitle, MetricCard, Card, Grid, Slider, DataTable, Callout } from "../ui.jsx";
+import { setComp, setSimpleNetWorth } from "../../state/actions.js";
 
 export default function NetWorthProjection({ f, nw, profile, update, school }) {
-  const { series, crossover, schoolYears, terminal, opportunityCost, totalInvestment, annualLoanPmt, financing } = nw;
-  const mbaAhead = terminal.delta >= 0;
+  const { crossover, schoolYears, opportunityCost, totalInvestment, annualLoanPmt, financing } = nw;
   const yr = v => (v <= schoolYears ? `Yr ${v}` : `+${v - schoolYears}`);
+
+  // Present long projections in today's purchasing power. Both branches are
+  // deflated identically, so the ranking is unchanged — but the magnitudes,
+  // and where the two lines cross, are only meaningful in real terms.
+  const series = nw.series.map(d => ({
+    ...d,
+    noMba: Math.round(f.deflate(d.noMba, d.year)),
+    mbaP10: Math.round(f.deflate(d.mbaP10, d.year)),
+    mbaP25: Math.round(f.deflate(d.mbaP25, d.year)),
+    mbaP50: Math.round(f.deflate(d.mbaP50, d.year)),
+    mbaP75: Math.round(f.deflate(d.mbaP75, d.year)),
+    mbaP90: Math.round(f.deflate(d.mbaP90, d.year)),
+    mbaMean: Math.round(f.deflate(d.mbaMean, d.year)),
+  }));
+  const last = series[series.length - 1];
+  const terminal = {
+    noMba: last.noMba, mbaP50: last.mbaP50, mbaP10: last.mbaP10,
+    mbaMean: last.mbaMean, delta: last.mbaP50 - last.noMba,
+  };
+  const mbaAhead = terminal.delta >= 0;
 
   return (
     <>
@@ -16,12 +36,15 @@ export default function NetWorthProjection({ f, nw, profile, update, school }) {
           Your comparison inputs
         </div>
         <Grid cols="repeat(auto-fit, minmax(250px, 1fr))" gap={24}>
-          <Slider label="Current total comp" value={profile.currentComp} min={0} max={500000} step={5000}
-            onChange={v => update({ currentComp: v })} format={f.money}
-            description="Base + bonus + equity today. This is what you give up by going." />
-          <Slider label="Current net worth" value={profile.currentNetWorth} min={-200000} max={2000000} step={10000}
-            onChange={v => update({ currentNetWorth: v })} format={f.money}
-            description="Assets minus debts. The starting point for both paths." />
+          <Slider label="Current total comp" value={profile.currentComp} min={0} max={800000} step={5000}
+            onChange={v => update(setComp(profile, { base: v - (profile.compensation?.bonus ?? 0) - (profile.compensation?.equityAnnual ?? 0) }))}
+            format={f.money}
+            description={profile.compensation?.equityAnnual > 0
+              ? `Base ${f.compact(profile.compensation.base)} + bonus ${f.compact(profile.compensation.bonus)} + equity ${f.compact(profile.compensation.equityAnnual)}. Edit the split in Settings.`
+              : "Base + bonus + equity today. This is what you give up by going."} />
+          <Slider label="Current net worth" value={profile.currentNetWorth} min={-200000} max={3000000} step={10000}
+            onChange={v => update(setSimpleNetWorth(profile, v))} format={f.money}
+            description="Everything you own less what you owe. Break it down in Settings → Balance sheet." />
           <Slider label="Savings rate" value={profile.savingsRate} min={0} max={0.6} step={0.01}
             onChange={v => update({ savingsRate: v })} format={v => (v * 100).toFixed(0) + "%"}
             description="Share of after-tax income you invest each year." />
@@ -50,7 +73,7 @@ export default function NetWorthProjection({ f, nw, profile, update, school }) {
 
       <Card
         title="Net worth trajectory"
-        subtitle={`Orange is staying put: ${f.money(profile.currentComp)} growing at ${f.pct(profile.noMbaGrowth)}, saving ${(profile.savingsRate * 100).toFixed(0)}% of after-tax income. Blue is the median MBA outcome across ${profile.sims >= 1000 ? "the" : ""} simulated career draws, with the shaded band showing the P10-P90 range.`}
+        subtitle={`Orange is staying put: ${f.money(profile.currentComp)} growing at ${f.pct(profile.noMbaGrowth)}, saving ${(profile.savingsRate * 100).toFixed(0)}% of after-tax income. Blue is the median MBA outcome across the simulated career draws, with the shaded band showing the P10–P90 range. All figures ${f.showReal ? `are in today's money, deflated at ${f.pct(f.inflation)} a year — a future dollar buys less, and a 15-year projection that ignores that overstates both paths` : "are nominal future dollars, which overstate both paths relative to money you'd recognise today"}.`}
         style={{ marginBottom: 16 }}
       >
         <ResponsiveContainer width="100%" height={350}>
@@ -106,7 +129,7 @@ export default function NetWorthProjection({ f, nw, profile, update, school }) {
               rows={[
                 ["Year 1", f.money(profile.currentComp), "0 (in school)"],
                 [`Year ${schoolYears + 1}`, f.money(profile.currentComp * Math.pow(1 + profile.noMbaGrowth, schoolYears)), f.money(nw.expectedY1)],
-                [`Year ${profile.horizon}`, f.money(nw.noMbaFinalComp), f.money(nw.mbaFinalComp)],
+                [`Year ${profile.horizon}`, f.real(nw.noMbaFinalComp, profile.horizon), f.real(nw.mbaFinalComp, profile.horizon)],
                 [`Net worth yr ${profile.horizon}`, f.compact(terminal.noMba), f.compact(terminal.mbaP50)],
               ]}
             />

@@ -1,5 +1,5 @@
 import { mulberry32, normalRandom, weightedChoice, normalizeWeights } from "./random.js";
-import { monthlyPayment, npvOfRepayment, splitLoan, aprForScore } from "./finance.js";
+import { monthlyPayment, npvOfRepayment, allocateTranches, aprForScore } from "./finance.js";
 import { summarize, histogram, mean, percentile } from "./stats.js";
 import { totalCoa, salaryIndex } from "../data/schools.js";
 
@@ -17,40 +17,92 @@ export function effectiveApr(cfg) {
 }
 
 /**
- * Deterministic financing picture: what the programme costs, what is already
- * covered, and how the remainder splits between capped and private debt.
+ * Deterministic financing picture: what the programme costs, what is covered
+ * without borrowing, and how the remainder is allocated across debt sources.
+ *
+ * The waterfall runs cheapest-first:
+ *
+ *   cost → scholarship → cash → equity sale → employer → family
+ *        → federal (if used) → private (absorbs the rest)
+ *
+ * Federal is a *choice*, not a given. Someone may be ineligible, may be
+ * outside the US, or may deliberately skip it. When it is switched off the
+ * private tranche simply absorbs that share — the arithmetic is unremarkable,
+ * but what you give up (income-driven repayment, forbearance, forgiveness,
+ * death and disability discharge) is not, and the UI says so rather than
+ * treating this as a neutral toggle.
  */
 export function resolveFinancing(cfg, overrides = {}) {
   const school = overrides.school ?? cfg.school;
-  const scholarship = overrides.scholarship ?? cfg.scholarship;
-  const savingsDeployed = overrides.savingsDeployed ?? cfg.savingsDeployed;
+  const scholarship = overrides.scholarship ?? cfg.scholarship ?? 0;
+  const savingsDeployed = overrides.savingsDeployed ?? cfg.savingsDeployed ?? 0;
+  const equityProceeds = overrides.equityProceeds ?? 0;
   const programYears = school.programYears ?? 2;
 
+  const funding = { ...(cfg.funding ?? {}), ...(overrides.funding ?? {}) };
+  const employer = funding.employer?.amount ?? 0;
+  const family = funding.family ?? { amount: 0, rate: 0, termYears: 10 };
+  const useFederal = overrides.useFederal ?? funding.useFederal ?? true;
+
   const cost = totalCoa(school, cfg.coaEscalation);
-  const covered = scholarship + savingsDeployed;
+
+  // Non-debt sources, applied before anything is borrowed.
+  const covered = scholarship + savingsDeployed + equityProceeds + employer;
   const need = Math.max(0, cost - covered);
 
   const loan = { ...cfg.loan, ...(overrides.loan ?? {}) };
   const privateRate = overrides.privateRate ?? effectiveApr(cfg);
+  const federalCap = useFederal ? federalCapacity(loan, programYears) : 0;
 
-  const split = splitLoan(need, {
-    federalCap: federalCapacity(loan, programYears),
-    federalRate: loan.federalRate,
-    privateRate,
-    termMonths: loan.termMonths,
-  });
+  const alloc = allocateTranches(need, [
+    {
+      id: "family", label: "Family loan",
+      cap: family.amount ?? 0, rate: family.rate ?? 0,
+      termMonths: (family.termYears ?? 10) * 12,
+    },
+    {
+      id: "federal", label: "Federal",
+      cap: federalCap, rate: loan.federalRate, termMonths: loan.termMonths,
+    },
+    {
+      id: "private", label: "Private",
+      cap: Infinity, rate: privateRate, termMonths: loan.termMonths,
+    },
+  ]);
+
+  const byId = id => alloc.tranches.find(t => t.id === id) ?? { amount: 0, monthlyPayment: 0 };
+  const fed = byId("federal");
+  const priv = byId("private");
+  const fam = byId("family");
+
+  const npvAt = rate =>
+    alloc.tranches.reduce(
+      (s, t) => s + npvOfRepayment(t.amount, t.rate, t.termMonths, rate, loan.graceMonths),
+      0
+    );
 
   return {
-    ...split,
+    ...alloc,
+    need,
     cost,
     scholarship,
     savingsDeployed,
+    equityProceeds,
+    employer,
+    covered,
     programYears,
     privateRate,
-    npvAtDiscount: npvOfRepayment(split.federal, loan.federalRate, loan.termMonths, cfg.discountRate, loan.graceMonths)
-      + npvOfRepayment(split.private, privateRate, loan.termMonths, cfg.discountRate, loan.graceMonths),
-    npvAtMarket: npvOfRepayment(split.federal, loan.federalRate, loan.termMonths, cfg.marketReturn, loan.graceMonths)
-      + npvOfRepayment(split.private, privateRate, loan.termMonths, cfg.marketReturn, loan.graceMonths),
+    useFederal,
+
+    // Named accessors kept so existing sections keep working unchanged.
+    federal: fed.amount,
+    private: priv.amount,
+    familyLoan: fam.amount,
+    federalPmt: fed.monthlyPayment,
+    privatePmt: priv.monthlyPayment,
+
+    npvAtDiscount: npvAt(cfg.discountRate),
+    npvAtMarket: npvAt(cfg.marketReturn),
   };
 }
 
@@ -86,6 +138,13 @@ export function runCoreSim(cfg, opts = {}) {
   const { list, probs } = pathMix(cfg);
   const horizon = opts.wealthYears ?? 10;
 
+  // Existing debt service, plus any net monthly outflow on property. Both are
+  // already-committed obligations that compete with a student-loan payment.
+  const existingDebt = cfg.existingMonthlyDebt ?? 0;
+  const propertyDrain = Math.max(0, -(cfg.propertyCashFlow ?? 0) / 12);
+  const otherObligations = existingDebt + propertyDrain;
+  const totalMonthlyObligations = financing.totalPmt + otherObligations;
+
   const wealth = [], dti = [], income = [];
   let stressCount = 0;
 
@@ -96,8 +155,12 @@ export function runCoreSim(cfg, opts = {}) {
     y1 = Math.max(y1, INCOME_FLOOR);
     income.push(y1);
 
+    // Affordability is about ALL committed debt service, not just the new
+    // loan. A car payment and a mortgage do not disappear because you
+    // enrolled, and a payment that looks comfortable in isolation can be
+    // unaffordable once what you already owe is counted.
     const netMonthly = (y1 * (1 - cfg.taxRate)) / 12;
-    const ratio = netMonthly > 0 ? financing.totalPmt / netMonthly : 1;
+    const ratio = netMonthly > 0 ? totalMonthlyObligations / netMonthly : 1;
     dti.push(ratio);
     if (ratio > cfg.stressThreshold) stressCount++;
 
@@ -117,6 +180,13 @@ export function runCoreSim(cfg, opts = {}) {
   return {
     financing,
     stressProb: stressCount / nSim,
+    // Surfaced so the UI can show what the burden is actually made of.
+    obligations: {
+      loan: financing.totalPmt,
+      existingDebt,
+      property: propertyDrain,
+      total: totalMonthlyObligations,
+    },
     // Note: total repayment is deterministic given the inputs, so it has no
     // distribution -- reporting percentiles on it would be meaningless.
     totalRepaid: financing.totalRepaid,

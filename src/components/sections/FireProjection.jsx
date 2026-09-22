@@ -2,6 +2,7 @@ import { ComposedChart, Area, Line, PieChart, Pie, Cell, XAxis, YAxis, Cartesian
 import { C, MONO, tooltipStyle } from "../../theme.js";
 import { SectionTitle, MetricCard, Card, Grid, Slider, DataTable, Callout, Toggle } from "../ui.jsx";
 import { ACCOUNT_TYPES } from "../../lib/fire.js";
+import { setFireAccount, setTaxableBasis } from "../../state/actions.js";
 
 const MIX_COLORS = { taxable: C.green, cash: C.muted, afterTax: C.accent, preTax: C.orange, taxFree: C.accent2 };
 
@@ -9,7 +10,9 @@ export default function FireProjection({ f, fire, profile, update }) {
   const { target, coast, startingTotal, trajectory, mixAtFire, medianFireYear, medianFireAge,
     fireBy, survivalRate, avgEffectiveTaxRate, alreadyCoasting } = fire;
 
-  const setAccount = (k, v) => update({ accounts: { ...profile.accounts, [k]: v } });
+  // These edit the shared balance sheet, not a private copy — so a change
+  // here shows up in net worth on every other tab.
+  const setAccount = (k, v) => update(setFireAccount(profile, k, v));
   const setContribution = (k, v) => update({ contributions: { ...profile.contributions, [k]: v } });
 
   const mixData = Object.entries(mixAtFire)
@@ -66,11 +69,14 @@ export default function FireProjection({ f, fire, profile, update }) {
           {ACCOUNT_TYPES.map(a => (
             <Slider key={a.id} label={a.label} value={profile.accounts[a.id] ?? 0}
               min={0} max={3000000} step={5000}
-              onChange={v => setAccount(a.id, v)} format={f.money} description={a.note} />
+              onChange={v => setAccount(a.id, v)} format={f.money}
+              description={a.id === "taxable"
+                ? "Brokerage, vested equity and other investments combined. Editing here adjusts the brokerage balance."
+                : a.note} />
           ))}
           <Slider label="Taxable account cost basis" value={profile.taxableBasis}
             min={0} max={Math.max(10000, profile.accounts.taxable)} step={5000}
-            onChange={v => update({ taxableBasis: v })} format={f.money}
+            onChange={v => update(setTaxableBasis(profile, v))} format={f.money}
             description="A lower basis means more of a withdrawal is a taxable gain." />
         </Grid>
 

@@ -4,7 +4,15 @@ import { CURRENCIES } from "../data/loanPresets.js";
 
 /* ── Formatting ───────────────────────────────────────────────────────── */
 
-export function makeFormatters(currencyCode = "USD") {
+/**
+ * Currency formatters.
+ *
+ * `real(amount, yearsOut)` deflates a future figure into today's purchasing
+ * power. Pass `showReal: false` to leave everything nominal. Without this, a
+ * projection ending at "$2.4M in 15 years" invites comparison against a
+ * salary earned today, and those are not the same units.
+ */
+export function makeFormatters(currencyCode = "USD", { showReal = false, inflation = 0.03 } = {}) {
   const sym = CURRENCIES.find(c => c.code === currencyCode)?.symbol ?? "$";
   const money = n => sym + Math.round(n).toLocaleString();
   const compact = n => {
@@ -14,7 +22,20 @@ export function makeFormatters(currencyCode = "USD") {
     if (abs >= 1000) return `${sign}${sym}${Math.round(abs / 1000)}k`;
     return `${sign}${sym}${Math.round(abs)}`;
   };
-  return { sym, money, compact, pct: n => (n * 100).toFixed(1) + "%" };
+  const deflate = (n, yearsOut = 0) =>
+    showReal && yearsOut > 0 ? n / Math.pow(1 + inflation, yearsOut) : n;
+
+  return {
+    sym, money, compact,
+    pct: n => (n * 100).toFixed(1) + "%",
+    showReal, inflation,
+    deflate,
+    // Same as money/compact, but for figures that sit `yearsOut` in the future.
+    real: (n, yearsOut) => money(deflate(n, yearsOut)),
+    realCompact: (n, yearsOut) => compact(deflate(n, yearsOut)),
+    // Suffix for axis and column labels.
+    moneyNote: showReal ? "in today's money" : "nominal",
+  };
 }
 
 /* ── Inputs ───────────────────────────────────────────────────────────── */

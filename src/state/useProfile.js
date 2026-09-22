@@ -1,5 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { makeDefaultProfile } from "./defaults.js";
+import { makeDefaultProfile, migrateV1toV2, PROFILE_VERSION } from "./defaults.js";
+
+/**
+ * Brings a stored profile up to the current schema.
+ *
+ * Saved scenarios are the user's own work, so a schema change must upgrade
+ * them rather than discard them. An unrecognised future version is left
+ * alone and merged over defaults — better to render something slightly odd
+ * than to wipe data written by a newer build.
+ */
+function migrate(stored) {
+  if (!stored) return null;
+  let p = stored;
+  if ((p.version ?? 1) === 1) p = migrateV1toV2(p);
+  return p;
+}
 
 const STORAGE_KEY = "mba-finance-simulator:profile:v1";
 
@@ -42,10 +57,10 @@ export function encodeProfile(profile) {
 export function useProfile() {
   const [profile, setProfile] = useState(() => {
     const defaults = makeDefaultProfile();
-    const shared = readFromHash();
+    const shared = migrate(readFromHash());
     if (shared) return { ...defaults, ...shared };
-    const stored = readFromStorage();
-    if (stored && stored.version === defaults.version) return { ...defaults, ...stored };
+    const stored = migrate(readFromStorage());
+    if (stored) return { ...defaults, ...stored };
     return defaults;
   });
 
@@ -98,7 +113,7 @@ export function useProfile() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const parsed = JSON.parse(String(reader.result));
+        const parsed = migrate(JSON.parse(String(reader.result)));
         setProfile({ ...makeDefaultProfile(), ...parsed });
       } catch {
         alert("That file could not be read as a saved scenario.");

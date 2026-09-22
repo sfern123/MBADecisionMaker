@@ -1,10 +1,11 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from "recharts";
-import { C, tooltipStyle } from "../../theme.js";
+import { C, MONO, tooltipStyle } from "../../theme.js";
 import { SectionTitle, MetricCard, Card, Grid, DataTable } from "../ui.jsx";
 
 export default function MonteCarlo({ f, core, profile, pathSummary }) {
-  const { wealth, dti, income, stressProb } = core;
+  const { wealth, dti, income, stressProb, obligations } = core;
   const threshold = profile.stressThreshold * 100;
+  const hasOther = (obligations?.existingDebt ?? 0) + (obligations?.property ?? 0) > 0;
 
   return (
     <>
@@ -26,9 +27,11 @@ export default function MonteCarlo({ f, core, profile, pathSummary }) {
           color={C.green}
         />
         <MetricCard
-          label="Median year-1 payment burden"
+          label="Median year-1 debt burden"
           value={f.pct(dti.p50)}
-          sub={`Worst decile: ${f.pct(dti.p90)}`}
+          sub={hasOther
+            ? `All obligations, not just the loan. Worst decile: ${f.pct(dti.p90)}`
+            : `Worst decile: ${f.pct(dti.p90)}`}
           color={dti.p50 > profile.stressThreshold ? C.orange : C.green}
         />
         <MetricCard
@@ -37,6 +40,31 @@ export default function MonteCarlo({ f, core, profile, pathSummary }) {
           sub={`P5 ${f.money(income.p5)} · P95 ${f.money(income.p95)}`}
         />
       </Grid>
+
+      {hasOther && (
+        <Card
+          title="What the monthly burden is made of"
+          subtitle="A student-loan payment does not arrive in isolation. Debts you already carry compete for the same income, which is why the affordability figures above count all of them."
+          style={{ marginBottom: 18 }}
+        >
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "stretch" }}>
+            {[
+              ["Student loan", obligations.loan, C.accent],
+              ["Existing debts", obligations.existingDebt, C.orange],
+              ["Property (net outflow)", obligations.property, C.yellow],
+            ].filter(([, v]) => v > 0).map(([label, v, col]) => (
+              <div key={label} style={{ flex: "1 1 150px", background: C.bg, border: `1px solid ${col}44`, borderRadius: 8, padding: "10px 13px" }}>
+                <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: C.muted }}>{label}</div>
+                <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: col }}>{f.money(v)}<span style={{ fontSize: 11, color: C.faint }}>/mo</span></div>
+              </div>
+            ))}
+            <div style={{ flex: "1 1 150px", background: C.panel, border: `1px solid ${C.red}66`, borderRadius: 8, padding: "10px 13px" }}>
+              <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: C.muted }}>Total committed</div>
+              <div style={{ fontFamily: MONO, fontSize: 17, fontWeight: 700, color: C.red }}>{f.money(obligations.total)}<span style={{ fontSize: 11, color: C.faint }}>/mo</span></div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <Card
         title="Career mix being simulated"

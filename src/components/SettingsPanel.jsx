@@ -3,13 +3,15 @@ import { C, MONO } from "../theme.js";
 import { ALL_SCHOOLS, CUSTOM_SCHOOL, SCHOOL_DATA_AS_OF, totalCoa } from "../data/schools.js";
 import { CAREER_DATA_AS_OF, blankCustomPath } from "../data/careerPaths.js";
 import { resolvePaths } from "../state/defaults.js";
-import { LOAN_PRESETS, CURRENCIES, TERM_OPTIONS } from "../data/loanPresets.js";
-import { GROWTH_PRESETS, DEFAULT_EQUITY } from "../data/equityPresets.js";
+import { LOAN_PRESETS, CURRENCIES, TERM_OPTIONS, FEDERAL_PROTECTIONS } from "../data/loanPresets.js";
+import BalanceSheetTab from "./BalanceSheetTab.jsx";
+import { totalComp } from "../state/derived.js";
+import { setComp, setDetailLevel, setUseFederal } from "../state/actions.js";
 import { STATE_PRESETS, TAX_YEAR, TAX_SOURCE } from "../data/taxData.js";
 import { NumberField, TextField, Select, Toggle, Button, Callout, Grid, Badge, makeFormatters } from "./ui.jsx";
 import { encodeProfile } from "../state/useProfile.js";
 
-const TABS = ["School", "Career paths", "Loan rules", "Equity", "Tax", "Assumptions", "My data"];
+const TABS = ["Balance sheet", "Income", "School", "Career paths", "Loan rules", "Tax", "Assumptions", "My data"];
 
 export default function SettingsPanel({ profile, update, reset, exportJson, importJson, onClose }) {
   const [tab, setTab] = useState("School");
@@ -45,7 +47,8 @@ export default function SettingsPanel({ profile, update, reset, exportJson, impo
         {tab === "School" && <SchoolTab profile={profile} set={set} f={f} />}
         {tab === "Career paths" && <CareerTab profile={profile} set={set} />}
         {tab === "Loan rules" && <LoanTab profile={profile} set={set} />}
-        {tab === "Equity" && <EquityTab profile={profile} set={set} f={f} />}
+        {tab === "Balance sheet" && <BalanceSheetTab profile={profile} set={set} f={f} />}
+        {tab === "Income" && <IncomeTab profile={profile} set={set} f={f} />}
         {tab === "Tax" && <TaxTab profile={profile} set={set} />}
         {tab === "Assumptions" && <AssumptionsTab profile={profile} set={set} />}
         {tab === "My data" && (
@@ -251,10 +254,33 @@ function CareerTab({ profile, set }) {
 function LoanTab({ profile, set }) {
   const preset = LOAN_PRESETS.find(p => p.id === profile.loanPresetId);
   const setLoan = patch => set({ loan: { ...profile.loan, ...patch }, loanPresetId: "custom" });
+  const useFederal = profile.funding?.useFederal ?? true;
 
   return (
     <>
-      <Select
+      <Toggle
+        label="Use federal student loans"
+        checked={useFederal}
+        onChange={v => set(setUseFederal(profile, v))}
+        hint="Turn off if you're ineligible, outside the US, or borrowing privately by choice. Everything then comes from private lenders."
+      />
+
+      {!useFederal && (
+        <Callout tone="warn" title="What you're giving up" style={{ marginBottom: 16 }}>
+          Private borrowing can be cheaper month to month with strong credit.
+          These protections have no private equivalent, and only matter in the
+          situations you can't plan for:
+          <div style={{ marginTop: 8 }}>
+            {FEDERAL_PROTECTIONS.map(fp => (
+              <div key={fp.label} style={{ marginBottom: 4 }}>
+                <strong style={{ color: C.text }}>{fp.label}</strong> — {fp.detail}
+              </div>
+            ))}
+          </div>
+        </Callout>
+      )}
+
+      {useFederal && <Select
         label="Preset"
         value={profile.loanPresetId}
         onChange={v => {
@@ -272,19 +298,19 @@ function LoanTab({ profile, set }) {
         }}
         options={LOAN_PRESETS.map(p => ({ value: p.id, label: p.label }))}
         hint={preset?.description}
-      />
+      />}
 
       <Callout tone="warn" style={{ marginBottom: 16 }}>
         Federal student-loan rates reset every 1 July, and private APRs depend
         on the lender and on you. Verify before relying on any of this.
       </Callout>
 
-      <Grid cols="1fr 1fr" gap={12}>
+      {useFederal && <Grid cols="1fr 1fr" gap={12}>
         <NumberField label="Subsidised cap / year" value={profile.loan.federalPerYear} onChange={v => setLoan({ federalPerYear: v })} step={500} min={0} hint="Set to 0 if no capped-rate programme applies." />
         <NumberField label="Lifetime cap" value={profile.loan.federalLifetimeCap} onChange={v => setLoan({ federalLifetimeCap: v })} step={5000} min={0} />
         <NumberField label="Capped-tranche rate" value={+(profile.loan.federalRate * 100).toFixed(2)} onChange={v => setLoan({ federalRate: v / 100 })} suffix="%" step={0.05} min={0} />
         <NumberField label="Grace period" value={profile.loan.graceMonths} onChange={v => setLoan({ graceMonths: v })} suffix="mo" step={1} min={0} hint="Months after graduation before repayment starts." />
-      </Grid>
+      </Grid>}
 
       <Select
         label="Repayment term"
@@ -334,6 +360,16 @@ function LoanTab({ profile, set }) {
 function AssumptionsTab({ profile, set }) {
   return (
     <>
+      <Toggle
+        label="Show long projections in today's money"
+        checked={profile.showRealDollars ?? true}
+        onChange={v => set({ showRealDollars: v })}
+        hint="On: future figures are deflated so they're comparable to what you earn now. Off: raw nominal dollars, which look bigger but overstate every long projection."
+      />
+      <NumberField label="Inflation" value={+((profile.inflation ?? 0.03) * 100).toFixed(2)}
+        onChange={v => set({ inflation: v / 100 })} suffix="%" step={0.25} min={0} max={15}
+        hint="Used both for the deflator above and inside the independence model." />
+
       <Grid cols="1fr 1fr" gap={12}>
         <NumberField label="Effective tax rate" value={Math.round(profile.taxRate * 100)} onChange={v => set({ taxRate: v / 100 })} suffix="%" step={1} min={0} max={60} hint="Federal + state/local + payroll." />
         <NumberField label="Savings rate" value={Math.round(profile.savingsRate * 100)} onChange={v => set({ savingsRate: v / 100 })} suffix="%" step={1} min={0} max={80} hint="Share of after-tax income invested." />
@@ -408,88 +444,6 @@ function DataTab({ profile, reset, exportJson, importJson, fileRef, onClose }) {
   );
 }
 
-/* ── Equity ───────────────────────────────────────────────────────────── */
-
-function EquityTab({ profile, set, f }) {
-  const e = profile.equity;
-  const setEquity = patch => set({ equity: { ...e, ...patch } });
-  const active = e.vestedShares > 0 || e.unvestedShares > 0;
-
-  return (
-    <>
-      <Callout tone="info" title="Optional" style={{ marginBottom: 16 }}>
-        Only relevant if you hold company stock or vesting RSUs. Enter a share
-        count and the Equity tab appears, with models for selling to cut
-        tuition debt and for handling the rest of the position.
-      </Callout>
-
-      <TextField label="What is it called?" value={e.label}
-        onChange={v => setEquity({ label: v })}
-        hint="Just a label — e.g. your employer's name." />
-
-      <Grid cols="1fr 1fr" gap={12}>
-        <NumberField label="Share price" value={e.price} onChange={v => setEquity({ price: v })}
-          step={1} min={0} prefix={f.sym} />
-        <NumberField label="Average cost basis" value={e.costBasis} onChange={v => setEquity({ costBasis: v })}
-          step={1} min={0} prefix={f.sym} hint="What you were taxed on at vest, per share." />
-        <NumberField label="Vested shares" value={e.vestedShares} onChange={v => setEquity({ vestedShares: v })}
-          step={10} min={0} hint="Sellable today." />
-        <NumberField label="Unvested shares" value={e.unvestedShares} onChange={v => setEquity({ unvestedShares: v })}
-          step={10} min={0} hint="Still vesting." />
-        <NumberField label="Vesting period" value={e.vestingYears} onChange={v => setEquity({ vestingYears: v })}
-          step={1} min={1} max={10} suffix="yrs" />
-        <NumberField label="Annual refresh grant" value={e.annualRefresh} onChange={v => setEquity({ annualRefresh: v })}
-          step={5000} min={0} prefix={f.sym} hint="New equity granted each year, by value." />
-      </Grid>
-
-      {active && (
-        <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, marginBottom: 16, fontSize: 12, color: C.muted, lineHeight: 1.7 }}>
-          <div>Vested value: <span style={{ fontFamily: MONO, color: C.text }}>{f.money(e.vestedShares * e.price)}</span></div>
-          <div>Total position: <span style={{ fontFamily: MONO, color: C.text }}>{f.money((e.vestedShares + e.unvestedShares) * e.price)}</span></div>
-          <div>Unrealised gain: <span style={{ fontFamily: MONO, color: C.orange }}>{f.money(e.vestedShares * Math.max(0, e.price - e.costBasis))}</span></div>
-        </div>
-      )}
-
-      <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: C.muted, margin: "16px 0 8px" }}>
-        Growth assumption
-      </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-        {GROWTH_PRESETS.map(g => {
-          const on = Math.abs(e.drift - g.drift) < 0.005 && Math.abs(e.vol - g.vol) < 0.005;
-          return (
-            <button key={g.id} title={g.desc}
-              onClick={() => setEquity({ drift: g.drift, vol: g.vol, growthPresetId: g.id })}
-              style={{ background: on ? C.accent + "1a" : "transparent", border: `1px solid ${on ? C.accent : C.border}`,
-                color: on ? C.accent : C.muted, borderRadius: 6, padding: "4px 9px", fontSize: 11, cursor: "pointer" }}>
-              {g.label}
-            </button>
-          );
-        })}
-      </div>
-      <div style={{ fontSize: 10, color: C.faint, marginBottom: 12, lineHeight: 1.5 }}>
-        {GROWTH_PRESETS.find(g => g.id === e.growthPresetId)?.desc}
-      </div>
-
-      <Grid cols="1fr 1fr" gap={12}>
-        <NumberField label="Expected annual return" value={+(e.drift * 100).toFixed(1)}
-          onChange={v => setEquity({ drift: v / 100 })} suffix="%" step={1} min={-30} max={60} />
-        <NumberField label="Annual volatility" value={+(e.vol * 100).toFixed(0)}
-          onChange={v => setEquity({ vol: v / 100 })} suffix="%" step={1} min={5} max={100} />
-        <NumberField label="Other invested assets" value={profile.otherAssets}
-          onChange={v => set({ otherAssets: v })} step={10000} min={0} prefix={f.sym}
-          hint="Everything outside this holding — sets your concentration baseline." />
-        <NumberField label="Index volatility" value={+(profile.indexVol * 100).toFixed(0)}
-          onChange={v => set({ indexVol: v / 100 })} suffix="%" step={1} min={5} max={40}
-          hint="Volatility of the diversified alternative." />
-      </Grid>
-
-      <Button variant="danger" onClick={() => set({ equity: { ...DEFAULT_EQUITY } })}>
-        Clear equity position
-      </Button>
-    </>
-  );
-}
-
 /* ── Tax ──────────────────────────────────────────────────────────────── */
 
 function TaxTab({ profile, set }) {
@@ -536,6 +490,78 @@ function TaxTab({ profile, set }) {
           onChange={v => set({ flatCapGainsRate: v / 100 })} suffix="%" step={0.5} min={0} max={60}
           hint="Applied to every realised gain, regardless of holding period or income." />
       )}
+    </>
+  );
+}
+
+/* ── Income ───────────────────────────────────────────────────────────── */
+
+/**
+ * Compensation, split three ways.
+ *
+ * The split matters because the components behave differently: base is
+ * reliable, bonus swings with the year, and equity swings with the share
+ * price — which is the same price driving your concentration risk. A single
+ * blended number hides all of that.
+ *
+ * The annual equity grant is entered *here only*. It counts as pay and it
+ * becomes shares that vest into your balance sheet. Entering it in two places
+ * is what caused stock compensation to be double-counted before.
+ */
+function IncomeTab({ profile, set, f }) {
+  const c = profile.compensation ?? {};
+  const detailed = profile.detailLevel === "detailed";
+  const total = totalComp(c);
+  const equityShare = total > 0 ? (c.equityAnnual ?? 0) / total : 0;
+
+  return (
+    <>
+      {detailed ? (
+        <>
+          <Grid cols="1fr 1fr" gap={12}>
+            <NumberField label="Base salary" value={c.base ?? 0}
+              onChange={v => set(setComp(profile, { base: v }))} step={5000} min={0} prefix={f.sym}
+              hint="The part you can count on." />
+            <NumberField label="Annual bonus" value={c.bonus ?? 0}
+              onChange={v => set(setComp(profile, { bonus: v }))} step={5000} min={0} prefix={f.sym}
+              hint="A typical year, not your best one." />
+          </Grid>
+          <NumberField label="Annual equity grant" value={c.equityAnnual ?? 0}
+            onChange={v => set(setComp(profile, { equityAnnual: v }))} step={5000} min={0} prefix={f.sym}
+            hint="Value of stock granted per year. Enter it once here — it counts as pay and vests into your holding on the balance sheet." />
+
+          <div style={{ background: C.bg, border: `1px solid ${C.accent}44`, borderRadius: 9, padding: "12px 16px", marginBottom: 14 }}>
+            <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: C.muted }}>Total compensation</div>
+            <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 700, color: C.accent }}>{f.money(total)}</div>
+            {equityShare > 0 && (
+              <div style={{ fontSize: 11, color: equityShare > 0.35 ? C.orange : C.faint, marginTop: 4, lineHeight: 1.5 }}>
+                {(equityShare * 100).toFixed(0)}% of your pay moves with one share price
+                {equityShare > 0.35 && " — and your salary depends on that company too. Worth seeing on the Equity tab."}
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          <Callout tone="info" style={{ marginBottom: 14 }}>
+            Simple mode tracks pay as one figure. Switch to detailed to split
+            base, bonus and stock — worth doing if a meaningful share of your
+            pay is equity, since that part carries risk the rest doesn't.
+          </Callout>
+          <NumberField label="Total annual compensation" value={c.base ?? 0}
+            onChange={v => set(setComp(profile, { base: v, bonus: 0, equityAnnual: 0 }))}
+            step={5000} min={0} prefix={f.sym} hint="Everything before tax." />
+          <Button variant="primary" onClick={() => set(setDetailLevel(profile, "detailed"))}>
+            Switch to detailed →
+          </Button>
+        </>
+      )}
+
+      <NumberField label="Pay growth if you don't go" value={+((profile.noMbaGrowth ?? 0) * 100).toFixed(1)}
+        onChange={v => set({ noMbaGrowth: v / 100 })} suffix="%" step={0.5} min={0} max={25}
+        hint="Annual raises on your current track. Be honest about the ceiling — this is the counterfactual the whole comparison rests on." />
+      <NumberField label="Share of after-tax income you save" value={Math.round((profile.savingsRate ?? 0) * 100)}
+        onChange={v => set({ savingsRate: v / 100 })} suffix="%" step={1} min={0} max={80} />
     </>
   );
 }

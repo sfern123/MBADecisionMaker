@@ -57,7 +57,7 @@ export default function MonteCarlo({ f, core, profile, pathSummary }) {
       <Grid cols="1fr 1fr" gap={16} style={{ marginBottom: 18 }}>
         <Card
           title="Distribution: 10-year net wealth"
-          subtitle="Cumulative after-tax income over 10 post-graduation years, minus total loan repayment. Each bar counts how many simulated outcomes landed in that bucket. A long right tail means one of your selected paths carries lumpy upside."
+          subtitle="Cumulative after-tax income over 10 post-graduation years, minus total loan repayment. Each bar counts how many simulated outcomes landed in that bucket. A long right tail means one of your selected paths carries lumpy upside. The axis is trimmed to the middle 98% so extreme runs don't flatten the chart — they are still counted in the end bars."
         >
           <ResponsiveContainer width="100%" height={230}>
             <BarChart data={core.wealthHist} margin={{ left: 0, right: 8 }}>

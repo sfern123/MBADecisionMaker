@@ -1,6 +1,8 @@
 import { getSchool } from "../data/schools.js";
 import { CAREER_PATHS } from "../data/careerPaths.js";
 import { getPreset, DEFAULT_APR_TIERS } from "../data/loanPresets.js";
+import { DEFAULT_EQUITY } from "../data/equityPresets.js";
+import { LADDER_TEMPLATE, DEFAULT_MBA_ACCELERATION, DEFAULT_FOUNDER_OPTION, COMP_TIERS } from "../data/ladder.js";
 
 /**
  * Neutral starting point.
@@ -60,6 +62,45 @@ export function makeDefaultProfile() {
     // Career mix: start from the two most common MBA destinations rather
     // than presuming anything about the user's background.
     pathWeights: { consulting: 40, techpm: 30, ibanking: 30 },
+
+    // ── Tax detail (used by the equity and FIRE models) ──
+    // The flat `taxRate` above drives the headline financing sections; these
+    // drive the places where bracket detail actually changes the answer.
+    statePresetId: "none",
+    stateRate: 0,
+    useBracketTax: true,
+    flatCapGainsRate: null,
+
+    // ── Equity holding ──
+    // Zeroed by default, so the equity tabs stay out of the way until
+    // someone actually has vesting stock to model.
+    equity: { ...DEFAULT_EQUITY },
+    otherAssets: 0,
+    indexVol: 0.16,
+    diversifyPct: 0.25,
+    equityHorizonYears: 10,
+    equityAfterTaxTerminal: true,
+
+    // ── Career ladder ──
+    ladder: LADDER_TEMPLATE.map(l => ({ ...l })),
+    mbaAcceleration: { ...DEFAULT_MBA_ACCELERATION },
+    founderOption: { ...DEFAULT_FOUNDER_OPTION },
+    compTiers: [...COMP_TIERS],
+    ladderYears: 20,
+    noMbaVol: 0.03,
+
+    // ── Retirement / FIRE ──
+    currentAge: 28,
+    annualSpending: 65000,
+    withdrawalRate: 0.04,
+    inflation: 0.03,
+    portfolioVolatility: 0.15,
+    coastTargetAge: 60,
+    otherRetirementIncome: 0,
+    retirementIncomeStartAge: 67,
+    accounts: { preTax: 0, taxFree: 0, afterTax: 0, taxable: 0, cash: 0 },
+    contributions: { preTax: 0, taxFree: 0, afterTax: 0 },
+    taxableBasis: 0,
   };
 }
 
@@ -87,9 +128,17 @@ export function toSimConfig(profile) {
 
   const paths = resolvePaths(profile).filter(p => p.weight > 0);
 
+  const active = paths.length ? paths : [{ ...CAREER_PATHS[0], weight: 1 }];
+
+  // Expected first-year comp across the chosen mix — the base the career
+  // ladder climbs from on the MBA branch.
+  const totalWeight = active.reduce((s, p) => s + p.weight, 0) || 1;
+  const mbaBaseComp = active.reduce((s, p) => s + (p.weight / totalWeight) * p.year1, 0);
+
   return {
     ...profile,
     school,
-    paths: paths.length ? paths : [{ ...CAREER_PATHS[0], weight: 1 }],
+    paths: active,
+    mbaBaseComp,
   };
 }

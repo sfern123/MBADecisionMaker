@@ -4,10 +4,12 @@ import { ALL_SCHOOLS, CUSTOM_SCHOOL, SCHOOL_DATA_AS_OF, totalCoa } from "../data
 import { CAREER_DATA_AS_OF, blankCustomPath } from "../data/careerPaths.js";
 import { resolvePaths } from "../state/defaults.js";
 import { LOAN_PRESETS, CURRENCIES, TERM_OPTIONS } from "../data/loanPresets.js";
+import { GROWTH_PRESETS, DEFAULT_EQUITY } from "../data/equityPresets.js";
+import { STATE_PRESETS, TAX_YEAR, TAX_SOURCE } from "../data/taxData.js";
 import { NumberField, TextField, Select, Toggle, Button, Callout, Grid, Badge, makeFormatters } from "./ui.jsx";
 import { encodeProfile } from "../state/useProfile.js";
 
-const TABS = ["School", "Career paths", "Loan rules", "Assumptions", "My data"];
+const TABS = ["School", "Career paths", "Loan rules", "Equity", "Tax", "Assumptions", "My data"];
 
 export default function SettingsPanel({ profile, update, reset, exportJson, importJson, onClose }) {
   const [tab, setTab] = useState("School");
@@ -43,6 +45,8 @@ export default function SettingsPanel({ profile, update, reset, exportJson, impo
         {tab === "School" && <SchoolTab profile={profile} set={set} f={f} />}
         {tab === "Career paths" && <CareerTab profile={profile} set={set} />}
         {tab === "Loan rules" && <LoanTab profile={profile} set={set} />}
+        {tab === "Equity" && <EquityTab profile={profile} set={set} f={f} />}
+        {tab === "Tax" && <TaxTab profile={profile} set={set} />}
         {tab === "Assumptions" && <AssumptionsTab profile={profile} set={set} />}
         {tab === "My data" && (
           <DataTab
@@ -400,6 +404,138 @@ function DataTab({ profile, reset, exportJson, importJson, fileRef, onClose }) {
           }}
         >🗑 Clear my data</Button>
       </div>
+    </>
+  );
+}
+
+/* ── Equity ───────────────────────────────────────────────────────────── */
+
+function EquityTab({ profile, set, f }) {
+  const e = profile.equity;
+  const setEquity = patch => set({ equity: { ...e, ...patch } });
+  const active = e.vestedShares > 0 || e.unvestedShares > 0;
+
+  return (
+    <>
+      <Callout tone="info" title="Optional" style={{ marginBottom: 16 }}>
+        Only relevant if you hold company stock or vesting RSUs. Enter a share
+        count and the Equity tab appears, with models for selling to cut
+        tuition debt and for handling the rest of the position.
+      </Callout>
+
+      <TextField label="What is it called?" value={e.label}
+        onChange={v => setEquity({ label: v })}
+        hint="Just a label — e.g. your employer's name." />
+
+      <Grid cols="1fr 1fr" gap={12}>
+        <NumberField label="Share price" value={e.price} onChange={v => setEquity({ price: v })}
+          step={1} min={0} prefix={f.sym} />
+        <NumberField label="Average cost basis" value={e.costBasis} onChange={v => setEquity({ costBasis: v })}
+          step={1} min={0} prefix={f.sym} hint="What you were taxed on at vest, per share." />
+        <NumberField label="Vested shares" value={e.vestedShares} onChange={v => setEquity({ vestedShares: v })}
+          step={10} min={0} hint="Sellable today." />
+        <NumberField label="Unvested shares" value={e.unvestedShares} onChange={v => setEquity({ unvestedShares: v })}
+          step={10} min={0} hint="Still vesting." />
+        <NumberField label="Vesting period" value={e.vestingYears} onChange={v => setEquity({ vestingYears: v })}
+          step={1} min={1} max={10} suffix="yrs" />
+        <NumberField label="Annual refresh grant" value={e.annualRefresh} onChange={v => setEquity({ annualRefresh: v })}
+          step={5000} min={0} prefix={f.sym} hint="New equity granted each year, by value." />
+      </Grid>
+
+      {active && (
+        <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10, padding: 14, marginBottom: 16, fontSize: 12, color: C.muted, lineHeight: 1.7 }}>
+          <div>Vested value: <span style={{ fontFamily: MONO, color: C.text }}>{f.money(e.vestedShares * e.price)}</span></div>
+          <div>Total position: <span style={{ fontFamily: MONO, color: C.text }}>{f.money((e.vestedShares + e.unvestedShares) * e.price)}</span></div>
+          <div>Unrealised gain: <span style={{ fontFamily: MONO, color: C.orange }}>{f.money(e.vestedShares * Math.max(0, e.price - e.costBasis))}</span></div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.1em", color: C.muted, margin: "16px 0 8px" }}>
+        Growth assumption
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+        {GROWTH_PRESETS.map(g => {
+          const on = Math.abs(e.drift - g.drift) < 0.005 && Math.abs(e.vol - g.vol) < 0.005;
+          return (
+            <button key={g.id} title={g.desc}
+              onClick={() => setEquity({ drift: g.drift, vol: g.vol, growthPresetId: g.id })}
+              style={{ background: on ? C.accent + "1a" : "transparent", border: `1px solid ${on ? C.accent : C.border}`,
+                color: on ? C.accent : C.muted, borderRadius: 6, padding: "4px 9px", fontSize: 11, cursor: "pointer" }}>
+              {g.label}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 10, color: C.faint, marginBottom: 12, lineHeight: 1.5 }}>
+        {GROWTH_PRESETS.find(g => g.id === e.growthPresetId)?.desc}
+      </div>
+
+      <Grid cols="1fr 1fr" gap={12}>
+        <NumberField label="Expected annual return" value={+(e.drift * 100).toFixed(1)}
+          onChange={v => setEquity({ drift: v / 100 })} suffix="%" step={1} min={-30} max={60} />
+        <NumberField label="Annual volatility" value={+(e.vol * 100).toFixed(0)}
+          onChange={v => setEquity({ vol: v / 100 })} suffix="%" step={1} min={5} max={100} />
+        <NumberField label="Other invested assets" value={profile.otherAssets}
+          onChange={v => set({ otherAssets: v })} step={10000} min={0} prefix={f.sym}
+          hint="Everything outside this holding — sets your concentration baseline." />
+        <NumberField label="Index volatility" value={+(profile.indexVol * 100).toFixed(0)}
+          onChange={v => set({ indexVol: v / 100 })} suffix="%" step={1} min={5} max={40}
+          hint="Volatility of the diversified alternative." />
+      </Grid>
+
+      <Button variant="danger" onClick={() => set({ equity: { ...DEFAULT_EQUITY } })}>
+        Clear equity position
+      </Button>
+    </>
+  );
+}
+
+/* ── Tax ──────────────────────────────────────────────────────────────── */
+
+function TaxTab({ profile, set }) {
+  const preset = STATE_PRESETS.find(s => s.id === profile.statePresetId) ?? STATE_PRESETS[0];
+
+  return (
+    <>
+      <Callout tone="warn" title={`US brackets, tax year ${TAX_YEAR}`} style={{ marginBottom: 16 }}>
+        The flat effective rate below drives the headline financing sections.
+        Bracket detail is used where it genuinely changes the answer — capital
+        gains on an equity sale, and withdrawals in retirement. Rates change
+        every year;{" "}
+        <a href={TAX_SOURCE} target="_blank" rel="noreferrer" style={{ color: C.accent }}>check the source ↗</a>.
+        Outside the US, turn bracket mode off and set flat rates.
+      </Callout>
+
+      <NumberField label="Effective tax rate on income" value={Math.round(profile.taxRate * 100)}
+        onChange={v => set({ taxRate: v / 100 })} suffix="%" step={1} min={0} max={60}
+        hint="Federal + state/local + payroll, blended. Used everywhere income is taxed." />
+
+      <Select
+        label="State / local income tax"
+        value={profile.statePresetId}
+        onChange={v => {
+          const p = STATE_PRESETS.find(x => x.id === v);
+          set({ statePresetId: v, stateRate: p.rate });
+        }}
+        options={STATE_PRESETS.map(s => ({ value: s.id, label: `${s.label}${s.id !== "none" && s.id !== "custom" ? ` — ${(s.rate * 100).toFixed(1)}%` : ""}` }))}
+        hint="Approximate top marginal combined rate. Used for capital gains and retirement withdrawals."
+      />
+
+      {profile.statePresetId === "custom" && (
+        <NumberField label="Custom state rate" value={+(profile.stateRate * 100).toFixed(2)}
+          onChange={v => set({ stateRate: v / 100 })} suffix="%" step={0.25} min={0} max={20} />
+      )}
+
+      <Toggle label="Use progressive bracket maths where it matters"
+        checked={profile.useBracketTax}
+        onChange={v => set({ useBracketTax: v, flatCapGainsRate: v ? null : 0.25 })}
+        hint="On: US federal brackets plus your state rate. Off: a single flat rate on gains and withdrawals." />
+
+      {!profile.useBracketTax && (
+        <NumberField label="Flat capital-gains rate" value={+((profile.flatCapGainsRate ?? 0.25) * 100).toFixed(1)}
+          onChange={v => set({ flatCapGainsRate: v / 100 })} suffix="%" step={0.5} min={0} max={60}
+          hint="Applied to every realised gain, regardless of holding period or income." />
+      )}
     </>
   );
 }

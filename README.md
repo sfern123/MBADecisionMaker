@@ -12,9 +12,10 @@ your own `localStorage`.
 
 ## What it does
 
-Nine linked analyses, all driven from one set of inputs, all recalculating
-live as you change them:
+Five tabs of linked analysis, all driven from one set of inputs, all
+recalculating live as you change them.
 
+### Financing
 | | |
 |---|---|
 | **Loan structure** | Cost, financing need, the split between capped and private debt, and what each rate scenario costs |
@@ -23,9 +24,28 @@ live as you change them:
 | **School comparison** | Up to six programmes side by side on cost, debt, expected wealth, and downside |
 | **Capital stack** | How much of your cash to deploy vs. keep liquid |
 | **Sensitivity** | How the picture responds across deployment levels, plus the stress-vs-wealth tradeoff curve |
-| **Invest vs. deploy** | Pay down the loan, or keep the cash invested and borrow more? Month-by-month |
-| **Go or don't** | Net-worth trajectory against staying in your current job, with a crossover year |
-| **Readout** | Plain-language observations derived from your inputs |
+| **Invest vs. deploy** | Pay down the loan, or keep the cash invested and borrow more? Month by month |
+
+### Go or don't
+| | |
+|---|---|
+| **Net worth trajectory** | Against staying in your current job, with a crossover year and a P10–P90 band |
+| **Outcome tiers** | Odds of reaching each pay level and seniority rung, with and without the degree |
+
+### Equity *(appears only if you hold company stock)*
+| | |
+|---|---|
+| **Sell vs. hold** | Sell vested shares to cut tuition debt, or keep them and borrow more? Returns a distribution and a win probability, not a verdict |
+| **Diversification strategy** | Four ways to handle vesting equity, scored on wealth, worst drawdown, *and* how concentrated you end up |
+
+### Independence
+| | |
+|---|---|
+| **FIRE / Coast FIRE** | When the portfolio could cover your spending, with tax-aware withdrawal ordering across account types |
+
+### Summary
+Every model's answer on one page, plus an explicit list of where they
+**disagree** — and which single assumption each conclusion is resting on.
 
 ## Why it's built to be adapted
 
@@ -46,6 +66,20 @@ them all data:
   Repayment term, grace period, caps, and the score→APR tiers are all editable.
 - **Non-USD programmes work.** Currency is a display setting (no FX
   conversion — the app tells you when you're comparing across currencies).
+- **Equity is a generic holding, not one company.** Growth presets are
+  asset-class reference points (broad index, mature large-cap, high-growth,
+  stagnation) rather than one employer's past decade — anchoring on a single
+  stock's history is how concentration risk gets rationalised.
+- **The career ladder is defined in multiples, not dollars.** The same
+  structure describes a consulting partner track, a banking MD track, or a
+  corporate GM track. You supply the base; the multiples scale from it.
+- **The MBA's promotion acceleration is a visible slider.** It is the single
+  most contestable input in the tool and it decides the answer, so it sits on
+  the page at `1.60×` by default rather than buried in the code. Set it to
+  `1.00×` and the two paths differ only by starting salary and two lost years.
+- **Tax is progressive where it matters.** Current-year US federal brackets
+  plus a state rate for capital gains and retirement withdrawals, with a flat
+  rate everywhere else — and a flat-rate mode for use outside the US.
 
 ## Data, and how much to trust it
 
@@ -54,6 +88,8 @@ Every shipped figure carries its source and date in the data files:
 - **Cost of attendance** — [Clear Admit's 2025-26 COA table](https://www.clearadmit.com/real-numbers-of-mba-admissions/cost-of-mba-programs-in-the-u-s/), for a single non-resident student living off campus.
 - **School compensation** — [Poets&Quants' Class of 2025 salary and bonus data](https://poetsandquants.com/2026/05/31/high-low-mba-salaries-bonuses-at-the-top-100-u-s-b-schools/). Schools without a confirmed figure are flagged in the UI and do **not** silently scale your salary assumptions.
 - **Career-path compensation** — employment reports and recruiter surveys where available. Paths marked `est` in the UI are reasoned industry estimates, not published figures, and are labelled as such.
+- **Tax brackets** — [IRS Revenue Procedure 2025-32 via the Tax Foundation](https://taxfoundation.org/data/all/federal/2026-tax-brackets/), tax year 2026, single filer. State rates are flat approximations of the top marginal combined rate.
+- **The career ladder is structural, not empirical.** Nobody publishes reliable long-run promotion rates by degree. Those multiples and probabilities are reasoned defaults, useful for asking *"how much acceleration would the degree need to provide for this to be worth it?"* — not as a forecast.
 - **Rows with inconsistent source data** carry an explicit warning (e.g. a school whose listed COA swung implausibly year over year, usually a resident/non-resident reporting change).
 
 **These numbers go stale every single year.** Schools revise cost of
@@ -92,14 +128,25 @@ correctly on a project page.
 
 ```
 src/
-├── data/        schools · careerPaths · loanPresets     (all sourced and dated)
-├── lib/         random · finance · stats · simulation   (pure, no UI, testable)
-├── state/       defaults · useProfile                   (localStorage persistence)
+├── data/        schools · careerPaths · loanPresets      (sourced and dated)
+│                taxData · equityPresets · ladder
+├── lib/         random · finance · stats · tax · equity  (pure, no UI, testable)
+│                simulation · equityDecisions · ladder · fire
+├── state/       defaults · useProfile                    (localStorage persistence)
 └── components/  ui · Onboarding · SettingsPanel · sections/
 ```
 
-The simulation layer is pure JavaScript with no React dependency — you can
-import `src/lib/simulation.js` in Node and run scenarios headlessly.
+Every module under `src/lib/` is pure JavaScript with no React dependency, so
+you can run scenarios headlessly:
+
+```bash
+node --input-type=module -e "
+  import('./src/lib/simulation.js').then(async sim => {
+    const d = await import('./src/state/defaults.js');
+    const cfg = d.toSimConfig(d.makeDefaultProfile());
+    console.log(sim.resolveFinancing(cfg));
+  });"
+```
 
 ## Contributing
 

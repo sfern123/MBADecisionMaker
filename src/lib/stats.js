@@ -13,17 +13,36 @@ export function std(arr) {
   return Math.sqrt(arr.reduce((s, v) => s + (v - m) ** 2, 0) / arr.length);
 }
 
-// Returns { value, count } buckets ready to feed straight into a Recharts
-// <BarChart>. Uses a reduce rather than Math.min(...arr) because these arrays
-// run to thousands of entries and spreading them risks a call-stack overflow.
-export function histogram(arr, bins = 30) {
+/**
+ * Returns { value, count } buckets ready to feed straight into a Recharts
+ * <BarChart>.
+ *
+ * Uses a reduce rather than Math.min(...arr) because these arrays run to
+ * thousands of entries and spreading them risks a call-stack overflow.
+ *
+ * `clip` bounds the axis to a percentile range and piles anything beyond it
+ * into the end bins. Heavy-tailed distributions -- which is most of what this
+ * app simulates -- otherwise get their whole axis stretched by one extreme
+ * path, squashing the part you actually need to read. The tail is still
+ * counted, just not allowed to set the scale.
+ */
+export function histogram(arr, bins = 30, clip = 1) {
   if (!arr.length) return [];
-  let mn = Infinity, mx = -Infinity;
-  for (const v of arr) {
-    if (v < mn) mn = v;
-    if (v > mx) mx = v;
+
+  let mn, mx;
+  if (clip > 0 && arr.length > 50) {
+    mn = percentile(arr, clip);
+    mx = percentile(arr, 100 - clip);
+  } else {
+    mn = Infinity; mx = -Infinity;
+    for (const v of arr) {
+      if (v < mn) mn = v;
+      if (v > mx) mx = v;
+    }
   }
-  const width = (mx - mn) / bins || 1;
+  if (!(mx > mn)) { mx = mn + 1; }
+
+  const width = (mx - mn) / bins;
   const counts = Array(bins).fill(0);
   for (const v of arr) {
     let b = Math.floor((v - mn) / width);
